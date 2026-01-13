@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Uber Technologies, Inc.
+// Copyright (c) 2026 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -88,6 +88,10 @@ type Options struct {
 	// Generates an error on MarshalText and MarshalJSON if the enum value is
 	// unrecognized.
 	EnumTextMarshalStrict bool
+
+	// Enables a flexible union decoding mode that permits unknown values and
+	// returns an empty union struct in such cases.
+	UnionDecodeRelaxed bool
 }
 
 // Generate generates code based on the given options.
@@ -279,6 +283,7 @@ func generateModule(
 		PackageName:           normalizedPackageName,
 		NoZap:                 o.NoZap,
 		EnumTextMarshalStrict: o.EnumTextMarshalStrict,
+		UnionDecodeRelaxed:    o.UnionDecodeRelaxed,
 	})
 
 	if len(m.Constants) > 0 {

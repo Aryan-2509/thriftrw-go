@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Uber Technologies, Inc.
+// Copyright (c) 2026 Uber Technologies, Inc.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -81,13 +81,14 @@ func structure(g Generator, spec *compile.StructSpec) error {
 	}
 
 	fg := fieldGroupGenerator{
-		Namespace:   NewNamespace(),
-		Name:        name,
-		ThriftName:  spec.ThriftName(),
-		Doc:         spec.Doc,
-		Fields:      spec.Fields,
-		IsUnion:     spec.Type == ast.UnionType,
-		IsException: spec.Type == ast.ExceptionType,
+		Namespace:          NewNamespace(),
+		Name:               name,
+		ThriftName:         spec.ThriftName(),
+		Doc:                spec.Doc,
+		Fields:             spec.Fields,
+		IsUnion:            spec.Type == ast.UnionType,
+		IsException:        spec.Type == ast.ExceptionType,
+		UnionDecodeRelaxed: checkUnionDecodeRelaxed(g),
 	}
 
 	if err := fg.Generate(g); err != nil {
