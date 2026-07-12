@@ -194,15 +194,49 @@ func TestGenerateThriftFile_NilModule(t *testing.T) {
 	assert.Error(t, m.GenerateThriftFile(filepath.Join(t.TempDir(), "out.thrift")))
 }
 
+// TestGenerateThriftFile_IncludeRelativeToOutputDir verifies that when the
+// generated file is written to a directory different from the source module's
+// directory, the emitted include statement is computed relative to the output
+// file's location so the generated file recompiles correctly.
+func TestGenerateThriftFile_IncludeRelativeToOutputDir(t *testing.T) {
+	srcDir, mainPath := writeGenerateTestFiles(t)
+
+	original, err := Compile(mainPath)
+	require.NoError(t, err, "compiling source thrift")
+
+	// Write the generated file to a sibling directory. The included.thrift
+	// file remains only in srcDir, so the emitted include must traverse
+	// upwards (e.g. "../src/included.thrift") for recompilation to succeed.
+	outDir := filepath.Join(filepath.Dir(srcDir), "out")
+	require.NoError(t, os.MkdirAll(outDir, 0o755))
+	outPath := filepath.Join(outDir, "out_main.thrift")
+
+	require.NoError(t, original.GenerateThriftFile(outPath), "generating thrift file")
+
+	generated, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+
+	expectedRel, err := filepath.Rel(outDir, filepath.Join(srcDir, "included.thrift"))
+	require.NoError(t, err)
+	assert.Contains(t, string(generated), `include "`+expectedRel+`"`,
+		"include should be relative to the output file's directory")
+
+	// The generated file must recompile: this proves the include actually
+	// resolves from the output directory, not just that the string looks right.
+	recompiled, err := Compile(outPath)
+	require.NoError(t, err, "recompiling generated thrift from a different directory")
+	assert.Equal(t, len(original.Includes), len(recompiled.Includes), "include count preserved")
+}
+
 func TestModuleThriftIDL_Deterministic(t *testing.T) {
 	_, mainPath := writeGenerateTestFiles(t)
 
 	m, err := Compile(mainPath)
 	require.NoError(t, err)
 
-	first, err := m.thriftIDL()
+	first, err := m.thriftIDL(mainPath)
 	require.NoError(t, err)
-	second, err := m.thriftIDL()
+	second, err := m.thriftIDL(mainPath)
 	require.NoError(t, err)
 
 	assert.Equal(t, first, second, "generated output should be deterministic across runs")

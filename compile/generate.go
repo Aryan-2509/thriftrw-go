@@ -43,7 +43,7 @@ func (m *Module) GenerateThriftFile(path string) error {
 		return fmt.Errorf("nil module")
 	}
 
-	content, err := m.thriftIDL()
+	content, err := m.thriftIDL(path)
 	if err != nil {
 		return fmt.Errorf("generate thrift content for %q: %w", path, err)
 	}
@@ -64,12 +64,16 @@ func (m *Module) GenerateThriftFile(path string) error {
 // thriftIDL builds the Thrift IDL representation of the Module as a string.
 // Sections are emitted in the order: namespaces, includes, constants, types,
 // services.
-func (m *Module) thriftIDL() (string, error) {
+//
+// outputPath is the path the generated IDL will be written to; it is used to
+// compute include paths relative to the output file's directory so that the
+// generated file recompiles correctly from wherever the caller writes it.
+func (m *Module) thriftIDL(outputPath string) (string, error) {
 	var builder strings.Builder
 
 	writeNamespaces(&builder, m)
 
-	if err := writeIncludes(&builder, m); err != nil {
+	if err := writeIncludes(&builder, m, outputPath); err != nil {
 		return "", err
 	}
 
@@ -113,13 +117,23 @@ func writeNamespaces(builder *strings.Builder, module *Module) {
 }
 
 // writeIncludes writes the include statements for the module, reconstructing
-// each include path relative to the directory of the current thrift file.
-func writeIncludes(builder *strings.Builder, module *Module) error {
+// each include path relative to the directory of outputPath (the path the
+// generated IDL will be written to). Using the output directory — rather than
+// the source module's directory — ensures the emitted include resolves
+// correctly when the generated file is recompiled from a directory different
+// from where the source module was originally read.
+func writeIncludes(builder *strings.Builder, module *Module, outputPath string) error {
 	if len(module.Includes) == 0 {
 		return nil
 	}
 
-	moduleDir := filepath.Dir(module.ThriftPath)
+	// Normalize to absolute paths so filepath.Rel produces a consistent result
+	// regardless of whether outputPath and each ThriftPath were originally
+	// supplied as relative or absolute paths.
+	absOutputDir, err := filepath.Abs(filepath.Dir(outputPath))
+	if err != nil {
+		return fmt.Errorf("error while resolving absolute output directory for %q: %w", outputPath, err)
+	}
 
 	for _, name := range sortedKeys(module.Includes) {
 		includedModule, ok := module.Includes[name]
@@ -127,9 +141,14 @@ func writeIncludes(builder *strings.Builder, module *Module) error {
 			return fmt.Errorf("included module %q is nil in thrift file: %s", name, module.ThriftPath)
 		}
 
-		relPath, err := filepath.Rel(moduleDir, includedModule.Module.ThriftPath)
+		absIncluded, err := filepath.Abs(includedModule.Module.ThriftPath)
 		if err != nil {
-			return fmt.Errorf("error while computing relative include path for %q in thrift file %s: %w", name, module.ThriftPath, err)
+			return fmt.Errorf("error while resolving absolute path for included module %q: %w", name, err)
+		}
+
+		relPath, err := filepath.Rel(absOutputDir, absIncluded)
+		if err != nil {
+			return fmt.Errorf("error while computing include path for %q relative to output %q: %w", name, outputPath, err)
 		}
 
 		builder.WriteString(fmt.Sprintf("include \"%s\"\n", relPath))
