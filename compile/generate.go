@@ -31,6 +31,11 @@ import (
 	"go.uber.org/thriftrw/ast"
 )
 
+var (
+	filepathAbs = filepath.Abs
+	filepathRel = filepath.Rel
+)
+
 // GenerateThriftFile writes the Thrift IDL representation of this Module to the
 // given path. The content is reconstructed entirely from the Module's compiled
 // structured fields (namespaces, includes, constants, types, services) and does
@@ -130,7 +135,7 @@ func writeIncludes(builder *strings.Builder, module *Module, outputPath string) 
 	// Normalize to absolute paths so filepath.Rel produces a consistent result
 	// regardless of whether outputPath and each ThriftPath were originally
 	// supplied as relative or absolute paths.
-	absOutputDir, err := filepath.Abs(filepath.Dir(outputPath))
+	absOutputDir, err := filepathAbs(filepath.Dir(outputPath))
 	if err != nil {
 		return fmt.Errorf("error while resolving absolute output directory for %q: %w", outputPath, err)
 	}
@@ -141,12 +146,12 @@ func writeIncludes(builder *strings.Builder, module *Module, outputPath string) 
 			return fmt.Errorf("included module %q is nil in thrift file: %s", name, module.ThriftPath)
 		}
 
-		absIncluded, err := filepath.Abs(includedModule.Module.ThriftPath)
+		absIncluded, err := filepathAbs(includedModule.Module.ThriftPath)
 		if err != nil {
 			return fmt.Errorf("error while resolving absolute path for included module %q: %w", name, err)
 		}
 
-		relPath, err := filepath.Rel(absOutputDir, absIncluded)
+		relPath, err := filepathRel(absOutputDir, absIncluded)
 		if err != nil {
 			return fmt.Errorf("error while computing include path for %q relative to output %q: %w", name, outputPath, err)
 		}
@@ -173,7 +178,7 @@ func writeConstants(builder *strings.Builder, module *Module) error {
 
 		writeDocumentation(builder, constant.Doc)
 
-		typeStr, err := getType(constant.Type, module)
+		typeStr, err := getAnnotatedType(constant.Type, module)
 		if err != nil {
 			return fmt.Errorf("error while getting type for constant %s in thrift file %s: %w", name, module.ThriftPath, err)
 		}
@@ -339,17 +344,23 @@ func writeTypes(builder *strings.Builder, module *Module) error {
 
 // writeDocumentation writes a documentation comment block, if doc is non-empty.
 func writeDocumentation(builder *strings.Builder, doc string) {
+	writeIndentedDocumentation(builder, doc, "")
+}
+
+// writeIndentedDocumentation writes a documentation comment block prefixed with
+// indent on each line, if doc is non-empty.
+func writeIndentedDocumentation(builder *strings.Builder, doc, indent string) {
 	if doc == "" {
 		return
 	}
 
 	lines := strings.Split(strings.TrimSpace(doc), "\n")
-	builder.WriteString("/**")
+	builder.WriteString(indent + "/**")
 	builder.WriteString("\n")
 	for _, line := range lines {
-		builder.WriteString("* " + line + "\n")
+		builder.WriteString(indent + "* " + line + "\n")
 	}
-	builder.WriteString("*/")
+	builder.WriteString(indent + "*/")
 	builder.WriteString("\n")
 }
 
@@ -413,11 +424,11 @@ func writeTypedef(builder *strings.Builder, typedef *TypedefSpec, module *Module
 
 	writeDocumentation(builder, typedef.Doc)
 
-	targetType, err := getType(typedef.Target, module)
+	targetType, err := getAnnotatedType(typedef.Target, module)
 	if err != nil {
 		return fmt.Errorf("error while getting type name for typedef: %w", err)
 	}
-	builder.WriteString(fmt.Sprintf("typedef %s %s", targetType, typedef.Name))
+	builder.WriteString("typedef " + targetType + " " + typedef.Name)
 
 	if annotations := getAnnotations(typedef.Annotations); annotations != "" {
 		builder.WriteString(" " + annotations)
@@ -427,54 +438,55 @@ func writeTypedef(builder *strings.Builder, typedef *TypedefSpec, module *Module
 	return nil
 }
 
-// getType returns the Thrift type name of the given typeSpec. References to
+// getAnnotatedType returns the Thrift type string for the given typeSpec,
+// including annotations on the type and any nested components. References to
 // named types defined in included modules are qualified with the include alias.
-func getType(typeSpec TypeSpec, module *Module) (string, error) {
+func getAnnotatedType(typeSpec TypeSpec, module *Module) (string, error) {
 	if typeSpec == nil {
 		return "", fmt.Errorf("typeSpec is nil")
 	}
 
 	switch t := typeSpec.(type) {
 	case *BoolSpec:
-		return "bool", nil
+		return appendTypeAnnotations(t.ThriftName(), t.Annotations), nil
 	case *I8Spec:
-		return "i8", nil
+		return appendTypeAnnotations(t.ThriftName(), t.Annotations), nil
 	case *I16Spec:
-		return "i16", nil
+		return appendTypeAnnotations(t.ThriftName(), t.Annotations), nil
 	case *I32Spec:
-		return "i32", nil
+		return appendTypeAnnotations(t.ThriftName(), t.Annotations), nil
 	case *I64Spec:
-		return "i64", nil
+		return appendTypeAnnotations(t.ThriftName(), t.Annotations), nil
 	case *DoubleSpec:
-		return "double", nil
+		return appendTypeAnnotations(t.ThriftName(), t.Annotations), nil
 	case *StringSpec:
-		return "string", nil
+		return appendTypeAnnotations(t.ThriftName(), t.Annotations), nil
 	case *BinarySpec:
-		return "binary", nil
+		return appendTypeAnnotations(t.ThriftName(), t.Annotations), nil
 	case *ListSpec:
-		typeName, err := getType(t.ValueSpec, module)
+		valueType, err := getAnnotatedType(t.ValueSpec, module)
 		if err != nil {
 			return "", fmt.Errorf("error while getting type string for list %s : %w", t.ValueSpec.ThriftName(), err)
 		}
-		return fmt.Sprintf("list<%s>", typeName), nil
+		return appendTypeAnnotations(fmt.Sprintf("list<%s>", valueType), t.Annotations), nil
 
 	case *SetSpec:
-		typeName, err := getType(t.ValueSpec, module)
+		valueType, err := getAnnotatedType(t.ValueSpec, module)
 		if err != nil {
 			return "", fmt.Errorf("error while getting type string for set %s : %w", t.ValueSpec.ThriftName(), err)
 		}
-		return fmt.Sprintf("set<%s>", typeName), nil
+		return appendTypeAnnotations(fmt.Sprintf("set<%s>", valueType), t.Annotations), nil
 
 	case *MapSpec:
-		keyType, err := getType(t.KeySpec, module)
+		keyType, err := getAnnotatedType(t.KeySpec, module)
 		if err != nil {
 			return "", fmt.Errorf("error while getting type string for map key %s : %w", t.KeySpec.ThriftName(), err)
 		}
-		valueType, err := getType(t.ValueSpec, module)
+		valueType, err := getAnnotatedType(t.ValueSpec, module)
 		if err != nil {
 			return "", fmt.Errorf("error while getting type string for map value %s : %w", t.ValueSpec.ThriftName(), err)
 		}
-		return fmt.Sprintf("map<%s, %s>", keyType, valueType), nil
+		return appendTypeAnnotations(fmt.Sprintf("map<%s, %s>", keyType, valueType), t.Annotations), nil
 
 	case *TypedefSpec:
 		return getQualifiedTypeName(t.Name, t.File, module)
@@ -487,6 +499,15 @@ func getType(typeSpec TypeSpec, module *Module) (string, error) {
 	}
 
 	return "", fmt.Errorf("unknown type: %T in thrift file: %s", typeSpec, module.ThriftPath)
+}
+
+// appendTypeAnnotations appends Thrift type annotations to a type string when
+// present, e.g. "string" + (go.name = "x") -> `string (go.name = "x")`.
+func appendTypeAnnotations(typeStr string, annotations Annotations) string {
+	if typeAnnotations := getAnnotations(annotations); typeAnnotations != "" {
+		return typeStr + " " + typeAnnotations
+	}
+	return typeStr
 }
 
 // getAnnotations converts annotations to their Thrift string representation,
@@ -606,31 +627,14 @@ func writeStruct(builder *strings.Builder, structSpec *StructSpec, module *Modul
 			builder.WriteString("optional ")
 		}
 
-		fieldType, err := getType(field.Type, module)
+		fieldType, err := getAnnotatedType(field.Type, module)
 		if err != nil {
 			return fmt.Errorf("error while getting type string for field %s : %w in thrift file: %s", field.Name, err, module.ThriftPath)
 		}
 		builder.WriteString(fieldType + " ")
 
-		// Annotations carried by the field's (scalar) type spec.
-		if isScalarField(field) {
-			if typeSpecAnnotations := getAnnotations(field.Type.ThriftAnnotations()); typeSpecAnnotations != "" {
-				builder.WriteString(typeSpecAnnotations + " ")
-			}
-		}
-
-		builder.WriteString(field.Name)
-
-		if field.Default != nil {
-			defaultValue, err := constantValueToString(field.Default, module, 0)
-			if err != nil {
-				return fmt.Errorf("error while getting default value for field %s in thrift file: %s : %w", field.Name, module.ThriftPath, err)
-			}
-			builder.WriteString(" = " + defaultValue)
-		}
-
-		if annotations := getAnnotations(field.Annotations); annotations != "" {
-			builder.WriteString(" " + annotations)
+		if err := writeFieldNameDefaultAndAnnotations(builder, field, module); err != nil {
+			return fmt.Errorf("error while writing field %s in thrift file: %s : %w", field.Name, module.ThriftPath, err)
 		}
 
 		builder.WriteString("\n")
@@ -646,13 +650,86 @@ func writeStruct(builder *strings.Builder, structSpec *StructSpec, module *Modul
 	return nil
 }
 
-// isScalarField reports whether the field's type is a primitive Thrift type.
-func isScalarField(field *FieldSpec) bool {
-	switch field.Type.(type) {
-	case *BoolSpec, *I8Spec, *I16Spec, *I32Spec, *I64Spec, *DoubleSpec, *StringSpec, *BinarySpec:
-		return true
+// writeFieldNameDefaultAndAnnotations writes a field's name, optional default
+// value, and field-level annotations.
+func writeFieldNameDefaultAndAnnotations(builder *strings.Builder, field *FieldSpec, module *Module) error {
+	builder.WriteString(field.Name)
+
+	if field.Default != nil {
+		defaultValue, err := constantValueToString(field.Default, module, 0)
+		if err != nil {
+			return err
+		}
+		builder.WriteString(" = " + defaultValue)
 	}
-	return false
+
+	if annotations := getAnnotations(field.Annotations); annotations != "" {
+		builder.WriteString(" " + annotations)
+	}
+
+	return nil
+}
+
+// writeFunctionFields writes function parameters or throws-clause exception
+// fields. When any field has a docstring, fields are emitted one per line;
+// otherwise they are comma-separated inline.
+func writeFunctionFields(builder *strings.Builder, fields FieldGroup, module *Module, functionName, fieldKind string) error {
+	if len(fields) == 0 {
+		return nil
+	}
+
+	multiline := false
+	for _, field := range fields {
+		if field.Doc != "" {
+			multiline = true
+			break
+		}
+	}
+
+	paramIndent := "    "
+	for i, field := range fields {
+		if i > 0 {
+			if multiline {
+				builder.WriteString(",\n")
+			} else {
+				builder.WriteString(", ")
+			}
+		} else if multiline {
+			builder.WriteString("\n")
+		}
+
+		if multiline {
+			writeIndentedDocumentation(builder, field.Doc, paramIndent)
+			builder.WriteString(paramIndent)
+		}
+
+		builder.WriteString(fmt.Sprintf("%d: ", field.ID))
+		if field.Required {
+			builder.WriteString("required ")
+		}
+
+		fieldType, err := getAnnotatedType(field.Type, module)
+		if err != nil {
+			return fmt.Errorf(
+				"error while getting data type for function %s %s in thrift file: %s : %w",
+				fieldKind, field.Name, module.ThriftPath, err,
+			)
+		}
+		builder.WriteString(fieldType + " ")
+
+		if err := writeFieldNameDefaultAndAnnotations(builder, field, module); err != nil {
+			return fmt.Errorf(
+				"error while writing function %s %s for function %s in thrift file: %s : %w",
+				fieldKind, field.Name, functionName, module.ThriftPath, err,
+			)
+		}
+	}
+
+	if multiline {
+		builder.WriteString("\n  ")
+	}
+
+	return nil
 }
 
 // writeServices writes service definitions, including their functions,
@@ -687,7 +764,7 @@ func writeServices(builder *strings.Builder, module *Module) error {
 			}
 
 			if function.ResultSpec != nil && function.ResultSpec.ReturnType != nil {
-				returnType, err := getType(function.ResultSpec.ReturnType, module)
+				returnType, err := getAnnotatedType(function.ResultSpec.ReturnType, module)
 				if err != nil {
 					return fmt.Errorf("error while getting return type %s : %w in thrift file: %s", function.ResultSpec.ReturnType.ThriftName(), err, module.ThriftPath)
 				}
@@ -698,40 +775,16 @@ func writeServices(builder *strings.Builder, module *Module) error {
 
 			builder.WriteString(fname + "(")
 
-			for i, arg := range FieldGroup(function.ArgsSpec) {
-				if i > 0 {
-					builder.WriteString(", ")
-				}
-
-				fieldType, err := getType(arg.Type, module)
-				if err != nil {
-					return fmt.Errorf("error while getting data type for function argument %s for function %s in thrift file: %s : %w", arg.Name, function.Name, module.ThriftPath, err)
-				}
-				if arg.Required {
-					builder.WriteString(fmt.Sprintf("%d: required %s %s", arg.ID, fieldType, arg.Name))
-				} else {
-					builder.WriteString(fmt.Sprintf("%d: %s %s", arg.ID, fieldType, arg.Name))
-				}
+			if err := writeFunctionFields(builder, FieldGroup(function.ArgsSpec), module, function.Name, "argument"); err != nil {
+				return err
 			}
 
 			builder.WriteString(")")
 
 			if function.ResultSpec != nil && len(function.ResultSpec.Exceptions) > 0 {
 				builder.WriteString(" throws (")
-				for i, exc := range function.ResultSpec.Exceptions {
-					if i > 0 {
-						builder.WriteString(", ")
-					}
-
-					fieldType, err := getType(exc.Type, module)
-					if err != nil {
-						return fmt.Errorf("error while getting data type for exception %s in thrift file: %s : %w", exc.Name, module.ThriftPath, err)
-					}
-					if exc.Required {
-						builder.WriteString(fmt.Sprintf("%d: required %s %s", exc.ID, fieldType, exc.Name))
-					} else {
-						builder.WriteString(fmt.Sprintf("%d: %s %s", exc.ID, fieldType, exc.Name))
-					}
+				if err := writeFunctionFields(builder, function.ResultSpec.Exceptions, module, function.Name, "exception"); err != nil {
+					return err
 				}
 				builder.WriteString(")")
 			}
