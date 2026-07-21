@@ -156,7 +156,7 @@ func writeIncludes(builder *strings.Builder, module *Module, outputPath string) 
 			return fmt.Errorf("error while computing include path for %q relative to output %q: %w", name, outputPath, err)
 		}
 
-		builder.WriteString(fmt.Sprintf("include \"%s\"\n", relPath))
+		builder.WriteString(fmt.Sprintf("include \"%s\"\n", filepath.ToSlash(relPath)))
 	}
 	builder.WriteString("\n")
 
@@ -208,7 +208,7 @@ func constantValueToString(value ConstantValue, module *Module, indent int) (str
 	case ConstantInt:
 		return strconv.FormatInt(int64(v), 10), nil
 	case ConstantString:
-		return fmt.Sprintf("\"%s\"", escapeString(string(v))), nil
+		return strconv.Quote(string(v)), nil
 	case ConstantDouble:
 		return strconv.FormatFloat(float64(v), 'g', -1, 64), nil
 	case ConstantList:
@@ -521,7 +521,7 @@ func getAnnotations(annotations Annotations) string {
 	for _, name := range sortedKeys(annotations) {
 		value := annotations[name]
 		if value != "" {
-			parts = append(parts, fmt.Sprintf("%s = \"%s\"", name, escapeString(value)))
+			parts = append(parts, fmt.Sprintf("%s = %s", name, strconv.Quote(value)))
 		} else {
 			parts = append(parts, name)
 		}
@@ -546,16 +546,6 @@ func getQualifiedTypeName(typeName, typeFilePath string, module *Module) (string
 	}
 
 	return "", fmt.Errorf("unable to resolve qualified type name for type: %s from file: %s", typeName, typeFilePath)
-}
-
-// escapeString escapes special characters in a Thrift string literal.
-func escapeString(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	s = strings.ReplaceAll(s, "\r", "\\r")
-	s = strings.ReplaceAll(s, "\t", "\\t")
-	return s
 }
 
 // writeEnum writes an enum definition.

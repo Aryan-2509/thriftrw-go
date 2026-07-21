@@ -393,7 +393,7 @@ func TestGenerateThriftFile_IncludeRelativeToOutputDir(t *testing.T) {
 
 	expectedRel, err := filepath.Rel(outDir, filepath.Join(srcDir, "included.thrift"))
 	require.NoError(t, err)
-	assert.Contains(t, string(generated), `include "`+expectedRel+`"`,
+	assert.Contains(t, string(generated), `include "`+filepath.ToSlash(expectedRel)+`"`,
 		"include should be relative to the output file's directory")
 
 	// The generated file must recompile: this proves the include actually
@@ -420,10 +420,10 @@ func TestModuleThriftIDL_Deterministic(t *testing.T) {
 // unknownGenerateType is a TypeSpec outside the set handled by getAnnotatedType.
 type unknownGenerateType struct{ nativeThriftType }
 
-func (unknownGenerateType) ThriftName() string                            { return "unknown" }
-func (unknownGenerateType) ThriftAnnotations() Annotations                { return nil }
-func (unknownGenerateType) Link(Scope) (TypeSpec, error)                  { return nil, nil }
-func (unknownGenerateType) TypeCode() wire.Type                           { return wire.TI32 }
+func (unknownGenerateType) ThriftName() string                              { return "unknown" }
+func (unknownGenerateType) ThriftAnnotations() Annotations                  { return nil }
+func (unknownGenerateType) Link(Scope) (TypeSpec, error)                    { return nil, nil }
+func (unknownGenerateType) TypeCode() wire.Type                             { return wire.TI32 }
 func (unknownGenerateType) ForEachTypeReference(func(TypeSpec) error) error { return nil }
 
 type fakeConstantValue struct{}
